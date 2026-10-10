@@ -406,7 +406,9 @@ export function MeshPanel({ open, onOpenChange }: { open: boolean; onOpenChange:
                     <span className="text-red-500 font-bold">{snapshot.locationError}</span>
                   ) : snapshot.locationPreview ? (
                     <span className="text-[#F8FAFC]">
-                      <span className="text-[#0D9488] font-bold">GPS READY</span> 
+                      <span className={cn("font-bold", snapshot.locationPreview.isCached ? "text-amber-500" : "text-[#0D9488]")}>
+                        {snapshot.locationPreview.isCached ? "GPS CACHED" : "GPS READY"}
+                      </span> 
                       <span className="text-[#94A3B8] ml-1">(±{snapshot.locationPreview.accuracyMeters.toFixed(0)}m)</span>
                     </span>
                   ) : (

@@ -66,7 +66,8 @@ class NearbyConnectionsManager(
         val latitude: Double,
         val longitude: Double,
         val accuracyMeters: Float,
-        val capturedAt: Long
+        val capturedAt: Long,
+        val isCached: Boolean = false
     ) : Serializable {
         fun toJson(): JSONObject {
             return JSONObject().apply {
@@ -74,6 +75,7 @@ class NearbyConnectionsManager(
                 put("longitude", longitude)
                 put("accuracyMeters", accuracyMeters)
                 put("capturedAt", capturedAt)
+                put("isCached", isCached)
             }
         }
         companion object {
@@ -84,7 +86,8 @@ class NearbyConnectionsManager(
                         latitude = json.getDouble("latitude"),
                         longitude = json.getDouble("longitude"),
                         accuracyMeters = json.getDouble("accuracyMeters").toFloat(),
-                        capturedAt = json.getLong("capturedAt")
+                        capturedAt = json.getLong("capturedAt"),
+                        isCached = json.optBoolean("isCached", false)
                     )
                 } catch (e: Exception) { null }
             }

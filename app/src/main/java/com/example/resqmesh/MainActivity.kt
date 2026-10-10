@@ -41,6 +41,12 @@ class MainActivity : AppCompatActivity() {
         private const val TAG = "ResQLinkHost"
         private const val APP_ASSET_HOST = "appassets.androidplatform.net"
         private const val START_URL = "https://appassets.androidplatform.net/assets/web/index.html"
+        
+        // HACKATHON MOCK LOCATION OVERRIDE
+        // Set to true to override real GPS with the configured coordinates below.
+        private const val USE_MOCK_LOCATION_OVERRIDE = true
+        private const val MOCK_LATITUDE = 28.6692 // Ghaziabad
+        private const val MOCK_LONGITUDE = 77.4538
     }
 
     private val viewModel: MeshViewModel by viewModels()
@@ -302,6 +308,23 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun acquireLocationForPreview() {
+        if (USE_MOCK_LOCATION_OVERRIDE) {
+            isAcquiringLocation = false
+            locationError = null
+            previewLocation = NearbyConnectionsManager.LocationData(
+                latitude = MOCK_LATITUDE,
+                longitude = MOCK_LONGITUDE,
+                accuracyMeters = 5.0f,
+                capturedAt = System.currentTimeMillis(),
+                isCached = false
+            )
+            publishMeshState()
+            return
+        }
+
+        val reqId = java.util.UUID.randomUUID().toString().substring(0, 8)
+        Log.i(TAG, "[$reqId] acquireLocationForPreview() started")
+        
         isAcquiringLocation = true
         locationError = null
         previewLocation = null
@@ -309,66 +332,144 @@ class MainActivity : AppCompatActivity() {
 
         val lm = getSystemService(Context.LOCATION_SERVICE) as LocationManager
         
-        if (ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION) != PackageManager.PERMISSION_GRANTED && ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_COARSE_LOCATION) != PackageManager.PERMISSION_GRANTED) {
+        val hasFine = ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED
+        val hasCoarse = ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_COARSE_LOCATION) == PackageManager.PERMISSION_GRANTED
+        Log.i(TAG, "[$reqId] Permissions - Fine: $hasFine, Coarse: $hasCoarse")
+
+        if (!hasFine && !hasCoarse) {
+            Log.e(TAG, "[$reqId] Location permission denied")
             isAcquiringLocation = false
             locationError = "Location permission denied."
             publishMeshState()
             return
         }
 
-        if (!lm.isProviderEnabled(LocationManager.GPS_PROVIDER) && !lm.isProviderEnabled(LocationManager.NETWORK_PROVIDER)) {
+        val gpsEnabled = lm.isProviderEnabled(LocationManager.GPS_PROVIDER)
+        val networkEnabled = lm.isProviderEnabled(LocationManager.NETWORK_PROVIDER)
+        Log.i(TAG, "[$reqId] Providers - GPS: $gpsEnabled, Network: $networkEnabled")
+
+        if (!gpsEnabled && !networkEnabled) {
+            Log.e(TAG, "[$reqId] Location services disabled")
             isAcquiringLocation = false
             locationError = "Location services disabled."
             publishMeshState()
             return
         }
 
-        val provider = if (lm.isProviderEnabled(LocationManager.GPS_PROVIDER)) LocationManager.GPS_PROVIDER else LocationManager.NETWORK_PROVIDER
+        val provider = if (gpsEnabled) LocationManager.GPS_PROVIDER else LocationManager.NETWORK_PROVIDER
+        Log.i(TAG, "[$reqId] Selected provider: $provider")
         
         val handler = android.os.Handler(android.os.Looper.getMainLooper())
         var resolved = false
+        var cancellationSignal: android.os.CancellationSignal? = null
+        var locationListener: LocationListener? = null
+        
+        val finishWithFallback = { reason: String ->
+            Log.i(TAG, "[$reqId] finishWithFallback() triggered. Reason: $reason")
+            val lastKnown = try {
+                lm.getLastKnownLocation(provider)
+            } catch (e: SecurityException) { 
+                Log.e(TAG, "[$reqId] SecurityException getting last known location", e)
+                null 
+            }
+            
+            if (lastKnown != null) {
+                val ageMs = System.currentTimeMillis() - lastKnown.time
+                Log.i(TAG, "[$reqId] Last known location found. Age: ${ageMs}ms, Accuracy: ${lastKnown.accuracy}m")
+                if (ageMs < 10 * 60 * 1000) {
+                    Log.i(TAG, "[$reqId] Using cached location (recent enough)")
+                    previewLocation = NearbyConnectionsManager.LocationData(
+                        latitude = lastKnown.latitude,
+                        longitude = lastKnown.longitude,
+                        accuracyMeters = lastKnown.accuracy,
+                        capturedAt = lastKnown.time,
+                        isCached = true
+                    )
+                } else {
+                    Log.w(TAG, "[$reqId] Cached location too old, discarding")
+                    locationError = "Location acquisition timed out."
+                }
+            } else {
+                Log.w(TAG, "[$reqId] No last known location available")
+                locationError = "Location acquisition timed out."
+            }
+            Log.i(TAG, "[$reqId] Publishing mesh state from fallback")
+            publishMeshState()
+        }
+
         val timeoutRunnable = Runnable {
             if (!resolved) {
+                Log.w(TAG, "[$reqId] 10s timeout hit! Cancelling native request.")
                 resolved = true
                 isAcquiringLocation = false
-                locationError = "Location acquisition timed out."
-                publishMeshState()
+                
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                    cancellationSignal?.cancel()
+                } else {
+                    locationListener?.let { lm.removeUpdates(it) }
+                }
+                
+                finishWithFallback("Timeout")
             }
         }
         handler.postDelayed(timeoutRunnable, 10000)
 
         val callback = { location: Location? ->
             if (!resolved) {
+                Log.i(TAG, "[$reqId] Native callback received. Location is null? ${location == null}")
                 resolved = true
                 handler.removeCallbacks(timeoutRunnable)
                 isAcquiringLocation = false
                 if (location != null) {
+                    Log.i(TAG, "[$reqId] Fresh location acquired! Accuracy: ${location.accuracy}m")
                     previewLocation = NearbyConnectionsManager.LocationData(
                         latitude = location.latitude,
                         longitude = location.longitude,
                         accuracyMeters = location.accuracy,
-                        capturedAt = location.time
+                        capturedAt = location.time,
+                        isCached = false
                     )
+                    publishMeshState()
                 } else {
-                    locationError = "Could not acquire location."
+                    finishWithFallback("Callback returned null location")
                 }
-                publishMeshState()
+            } else {
+                Log.w(TAG, "[$reqId] Native callback received AFTER resolved/timeout. Ignored.")
             }
         }
 
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-            lm.getCurrentLocation(
-                provider,
-                null,
-                ContextCompat.getMainExecutor(this)
-            ) { location -> callback(location) }
-        } else {
-            lm.requestSingleUpdate(provider, object : LocationListener {
-                override fun onLocationChanged(location: Location) { callback(location) }
-                override fun onProviderDisabled(provider: String) {}
-                override fun onProviderEnabled(provider: String) {}
-                override fun onStatusChanged(provider: String?, status: Int, extras: Bundle?) {}
-            }, null)
+        try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                Log.i(TAG, "[$reqId] Invoking getCurrentLocation() on API >= 30")
+                cancellationSignal = android.os.CancellationSignal()
+                lm.getCurrentLocation(
+                    provider,
+                    cancellationSignal,
+                    ContextCompat.getMainExecutor(this)
+                ) { location -> callback(location) }
+            } else {
+                Log.i(TAG, "[$reqId] Invoking requestSingleUpdate() on API < 30")
+                locationListener = object : LocationListener {
+                    override fun onLocationChanged(location: Location) { 
+                        Log.i(TAG, "[$reqId] LocationListener.onLocationChanged fired")
+                        lm.removeUpdates(this)
+                        callback(location) 
+                    }
+                    override fun onProviderDisabled(provider: String) {}
+                    override fun onProviderEnabled(provider: String) {}
+                    override fun onStatusChanged(provider: String?, status: Int, extras: Bundle?) {}
+                }
+                lm.requestSingleUpdate(provider, locationListener!!, android.os.Looper.getMainLooper())
+            }
+        } catch (e: SecurityException) {
+            Log.e(TAG, "[$reqId] SecurityException during request initiation", e)
+            if (!resolved) {
+                resolved = true
+                handler.removeCallbacks(timeoutRunnable)
+                isAcquiringLocation = false
+                locationError = "Location permission error."
+                publishMeshState()
+            }
         }
     }
 
