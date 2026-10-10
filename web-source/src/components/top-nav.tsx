@@ -1,7 +1,8 @@
+import { useState, useEffect } from 'react';
 import {
   Siren, Building2, Wifi, WifiOff, Power, Search,
   BadgeCheck, Menu, Sun, Moon, Brain, ShieldAlert,
-  ChevronDown, Users, Radio,
+  ChevronDown, Users, Radio, Activity
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Switch } from '@/components/ui/switch';
@@ -16,6 +17,16 @@ import {
 import { cn } from '@/lib/utils';
 import type { NetworkStatus } from '@/hooks/use-network';
 
+interface MeshSnapshot {
+  status: string;
+  peers: string[];
+}
+
+const EMPTY_SNAPSHOT: MeshSnapshot = {
+  status: 'Mesh stopped',
+  peers: [],
+};
+
 interface TopNavProps {
   status: NetworkStatus;
   onToggleNetwork: () => void;
@@ -26,9 +37,9 @@ interface TopNavProps {
   theme: 'dark' | 'light';
   onToggleTheme: () => void;
   onTriage?: () => void;
-  /** NGO Portal button */
   onNgoPortal?: () => void;
   onMesh?: () => void;
+  onHome?: () => void;
   ngoLoggedIn?: boolean;
   volunteerLoggedIn?: boolean;
   ngoName?: string;
@@ -37,10 +48,43 @@ interface TopNavProps {
 export function TopNav({
   status, onToggleNetwork, onSos, onShelter,
   onFindHelp, onOfferHelp, theme, onToggleTheme, onTriage,
-  onNgoPortal, onMesh, ngoLoggedIn, volunteerLoggedIn, ngoName,
+  onNgoPortal, onMesh, onHome, ngoLoggedIn, volunteerLoggedIn, ngoName,
 }: TopNavProps) {
   const isOnline = status === 'online';
   const isNgoActive = ngoLoggedIn || volunteerLoggedIn;
+
+  const [mesh, setMesh] = useState<MeshSnapshot>(EMPTY_SNAPSHOT);
+
+  useEffect(() => {
+    const onUpdate = (event: Event) => {
+      const detail = (event as CustomEvent<MeshSnapshot>).detail;
+      if (!detail) return;
+      setMesh({
+        status: typeof detail.status === 'string' ? detail.status : EMPTY_SNAPSHOT.status,
+        peers: Array.isArray(detail.peers) ? detail.peers : [],
+      });
+    };
+    
+    // Initial fetch
+    try {
+      // @ts-ignore
+      const raw = window.ResQMeshNative?.getSnapshot();
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        setMesh({
+          status: parsed.status || EMPTY_SNAPSHOT.status,
+          peers: Array.isArray(parsed.peers) ? parsed.peers : [],
+        });
+      }
+    } catch {}
+
+    window.addEventListener('resqmesh-mesh-update', onUpdate);
+    return () => window.removeEventListener('resqmesh-mesh-update', onUpdate);
+  }, []);
+
+  const isMeshConnected = mesh.peers.length > 0;
+  const isMeshSearching = mesh.status.toLowerCase().includes('advertising') || mesh.status.toLowerCase().includes('starting');
+  const isMeshStopped = mesh.status.toLowerCase().includes('stopped') || mesh.status.toLowerCase().includes('idle');
 
   return (
     <header className="sticky top-0 z-40 w-full">
@@ -54,8 +98,7 @@ export function TopNav({
         <span className="inline-flex items-center gap-2">
           <span className="relative flex h-1.5 w-1.5 shrink-0">
             <span className={cn(
-              'absolute inline-flex h-full w-full animate-ping-slow rounded-full opacity-75',
-              isOnline ? 'bg-white' : 'bg-white',
+              'absolute inline-flex h-full w-full animate-ping-slow rounded-full opacity-75 bg-white'
             )} />
             <span className="relative inline-flex h-1.5 w-1.5 rounded-full bg-white" />
           </span>
@@ -70,37 +113,81 @@ export function TopNav({
         <div className="mx-auto flex h-14 max-w-[1600px] items-center justify-between px-3 sm:px-6 gap-3">
 
           {/* ── LEFT: Brand ── */}
-          <div className="flex items-center gap-3 min-w-0 shrink-0">
+          <div className="flex items-center gap-2 sm:gap-3 min-w-0 shrink-0">
             {/* Logo mark */}
-            <div className="relative flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-alert/15 ring-1 ring-alert/30">
-              <ShieldAlert className="h-5 w-5 text-alert" />
-              <span className="absolute -right-0.5 -top-0.5 flex h-2.5 w-2.5">
-                <span className="absolute inline-flex h-full w-full animate-ping-slow rounded-full bg-alert opacity-70" />
-                <span className="relative inline-flex h-2.5 w-2.5 rounded-full bg-alert" />
-              </span>
-            </div>
-
-            {/* Brand name */}
-            <div className="leading-none">
-              <div className="flex items-baseline gap-0.5">
-                <span className="text-base font-extrabold tracking-tight text-foreground">
-                  ResQ
-                </span>
-                <span className="text-base font-extrabold tracking-tight text-alert">
-                  Linkk
+            <button 
+              onClick={onHome}
+              className="flex items-center gap-2 sm:gap-3 hover:opacity-80 transition-opacity active:scale-95 focus:outline-none rounded-xl"
+            >
+              <div className="relative flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-alert/15 ring-1 ring-alert/30 hidden sm:flex">
+                <ShieldAlert className="h-5 w-5 text-alert" />
+                <span className="absolute -right-0.5 -top-0.5 flex h-2.5 w-2.5">
+                  <span className="absolute inline-flex h-full w-full animate-ping-slow rounded-full bg-alert opacity-70" />
+                  <span className="relative inline-flex h-2.5 w-2.5 rounded-full bg-alert" />
                 </span>
               </div>
-              <span className="hidden text-[9px] font-semibold uppercase tracking-[0.15em] text-muted-foreground md:block">
-                Offline Disaster Response
-              </span>
-            </div>
+
+              {/* Brand name */}
+              <div className="leading-none text-left">
+                <div className="flex items-baseline gap-0.5">
+                  <span className="text-base font-extrabold tracking-tight text-foreground">
+                    ResQ
+                  </span>
+                  <span className="text-base font-extrabold tracking-tight text-alert">
+                    Linkk
+                  </span>
+                </div>
+                <span className="hidden text-[9px] font-semibold uppercase tracking-[0.15em] text-muted-foreground md:block">
+                  Offline Disaster Response
+                </span>
+              </div>
+            </button>
 
             {/* Separator */}
-            <div className="hidden md:block h-7 w-px bg-border/60" />
+            <div className="hidden md:block h-7 w-px bg-border/60 mx-1" />
 
-            {/* Network pill */}
+            {/* Mesh Indicator (Compact) */}
+            {onMesh && (
+              <button 
+                onClick={onMesh}
+                className={cn(
+                  'flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[10px] sm:text-[11px] font-semibold transition-all active:scale-95',
+                  isMeshConnected 
+                    ? 'border-[#0D9488]/30 bg-[#0D9488]/10 text-[#0D9488]' 
+                    : isMeshSearching
+                      ? 'border-amber-500/30 bg-amber-500/10 text-amber-500'
+                      : 'border-border bg-secondary/50 text-muted-foreground'
+                )}
+                aria-label="Open Mesh Panel"
+              >
+                {isMeshConnected ? (
+                  <>
+                    <Activity className="h-3 w-3 animate-pulse" />
+                    <span className="hidden sm:inline">Mesh Connected ({mesh.peers.length})</span>
+                    <span className="sm:hidden">Mesh ({mesh.peers.length})</span>
+                  </>
+                ) : isMeshSearching ? (
+                  <>
+                    <span className="relative flex h-2 w-2 mr-0.5">
+                      <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-amber-500 opacity-75" />
+                      <span className="relative inline-flex h-2 w-2 rounded-full bg-amber-500" />
+                    </span>
+                    <span className="hidden sm:inline">Mesh Searching</span>
+                    <span className="sm:hidden">Searching...</span>
+                  </>
+                ) : (
+                  <>
+                    <Radio className="h-3 w-3" />
+                    <span className="hidden sm:inline">Mesh Stopped</span>
+                    <span className="sm:hidden">Mesh Off</span>
+                  </>
+                )}
+              </button>
+            )}
+
+            {/* Network pill (Internet) */}
             <div className={cn(
-              'hidden md:flex shrink-0 items-center gap-1.5 rounded-full border px-3 py-1 text-[11px] font-semibold transition-all',
+              'hidden lg:flex shrink-0 items-center gap-1.5 rounded-full border px-3 py-1 text-[11px] font-semibold transition-all',
               isOnline
                 ? 'border-success/30 bg-success/10 text-success'
                 : 'border-warning/30 bg-warning/10 text-warning',
@@ -108,16 +195,12 @@ export function TopNav({
               {isOnline ? (
                 <>
                   <Wifi className="h-3 w-3" />
-                  <span>Online</span>
+                  <span>Internet Online</span>
                 </>
               ) : (
                 <>
-                  <span className="relative flex h-2.5 w-2.5">
-                    <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-warning opacity-75" />
-                    <WifiOff className="relative h-2.5 w-2.5" />
-                  </span>
-                  <span className="hidden lg:inline">Offline — Local Sync Active</span>
-                  <span className="lg:hidden">Offline</span>
+                  <WifiOff className="h-3 w-3" />
+                  <span>Internet Offline</span>
                 </>
               )}
             </div>

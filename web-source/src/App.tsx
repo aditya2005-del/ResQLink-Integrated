@@ -12,6 +12,7 @@ import { VolunteerRegistrationModal } from '@/components/volunteer-registration-
 import { hasVolunteerProfile } from '@/lib/volunteer-profile';
 import { MobileNav } from '@/components/mobile-nav';
 import type { MobileTab } from '@/components/mobile-nav';
+import { HomeView } from '@/components/home-view';
 import { useNetwork, useOfflineQueue } from '@/hooks/use-network';
 import { useVolunteerOffers } from '@/hooks/use-volunteer-offers';
 import { useTheme } from '@/hooks/use-theme';
@@ -57,8 +58,34 @@ function App() {
   const [triageOpen, setTriageOpen]       = useState(false);
   const [meshOpen, setMeshOpen]           = useState(false);
   const [selectedId, setSelectedId] = useState<string | null>(null);
-  const [mobileTab, setMobileTab]   = useState<MobileTab>('map');
+  const [mobileTab, setMobileTab]   = useState<MobileTab>('home');
   const [navDest, setNavDest]       = useState<NavDestination | null>(null);
+
+  // Mesh State for HomeView
+  const [meshState, setMeshState] = useState<{ connected: boolean; peersCount: number }>({
+    connected: false,
+    peersCount: 0,
+  });
+
+  useEffect(() => {
+    const onUpdate = (event: Event) => {
+      const detail = (event as CustomEvent).detail;
+      if (!detail) return;
+      const peers = Array.isArray(detail.peers) ? detail.peers : [];
+      setMeshState({ connected: peers.length > 0, peersCount: peers.length });
+    };
+    try {
+      // @ts-ignore
+      const raw = window.ResQMeshNative?.getSnapshot();
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        const peers = Array.isArray(parsed.peers) ? parsed.peers : [];
+        setMeshState({ connected: peers.length > 0, peersCount: peers.length });
+      }
+    } catch {}
+    window.addEventListener('resqmesh-mesh-update', onUpdate);
+    return () => window.removeEventListener('resqmesh-mesh-update', onUpdate);
+  }, []);
 
   // ── NGO / Rescue Management state ─────────────────────────────────────────
   const [ngoLoginOpen,        setNgoLoginOpen]        = useState(false);
@@ -279,21 +306,39 @@ function App() {
         ngoLoggedIn={!!ngoSession}
         volunteerLoggedIn={!!volunteerSession}
         ngoName={ngoSession?.name ?? volunteerSession?.ngoName}
+        onHome={() => setMobileTab('home')}
       />
 
-      <StatusBanner
-        activeFilter={filter}
-        onFilterChange={setFilter}
-        requestCount={requests.length}
-        region={region}
-        onRegionChange={handleRegionChange}
-      />
+      {mobileTab !== 'home' && (
+        <StatusBanner
+          activeFilter={filter}
+          onFilterChange={setFilter}
+          requestCount={requests.length}
+          region={region}
+          onRegionChange={handleRegionChange}
+        />
+      )}
 
       {/* Main content */}
       <main className="mx-auto w-full max-w-[1600px] flex-1 px-3 py-3 sm:px-4 sm:py-4 lg:px-6">
 
+        {mobileTab === 'home' && (
+          <div className="h-[calc(100dvh-140px)] min-h-[520px] overflow-hidden rounded-2xl border border-border shadow-lg max-w-3xl mx-auto">
+            <HomeView 
+              requests={requests}
+              region={region}
+              meshConnected={meshState.connected}
+              meshPeersCount={meshState.peersCount}
+              isOnline={isOnline}
+              onSos={() => setSosOpen(true)}
+              onMesh={() => setMeshOpen(true)}
+              onNavigateTab={setMobileTab}
+            />
+          </div>
+        )}
+
         {/* Desktop: 2-column grid — map takes dominant space */}
-        <div className="hidden gap-4 lg:grid lg:grid-cols-[1.45fr_1fr]">
+        <div className={cn("hidden gap-4 lg:grid lg:grid-cols-[1.45fr_1fr]", mobileTab === 'home' ? 'lg:hidden' : '')}>
           {/* Map panel */}
           <div className="h-[calc(100vh-230px)] min-h-[520px] overflow-hidden rounded-2xl border border-border shadow-lg">
             <MapView
@@ -537,8 +582,13 @@ function App() {
 
       <MobileNav
         active={mobileTab}
-        onChange={setMobileTab}
-        onSos={() => setSosOpen(true)}
+        onChange={(tab) => {
+          if (tab === 'mesh') {
+            setMeshOpen(true);
+          } else {
+            setMobileTab(tab);
+          }
+        }}
       />
 
       {/* Help Bot — floats over everything, region-aware */}

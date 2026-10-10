@@ -69,11 +69,6 @@ export function StatusBanner({
                   <Radio className="h-2.5 w-2.5" />
                   Active Emergency
                 </span>
-                <span className="inline-flex items-center gap-1 rounded-full border border-warning/30 bg-warning/10 px-2 py-0.5 text-[10px] font-semibold text-warning">
-                  <Clock className="h-2.5 w-2.5" />
-                  <span className="hidden sm:inline">Live Response Ongoing</span>
-                  <span className="sm:hidden">Live</span>
-                </span>
               </div>
 
               {/* Zone title */}
@@ -170,45 +165,7 @@ export function StatusBanner({
           </div>
         </div>
 
-        {/* ── ROW 2: Stat cards ── */}
-        <div className="flex gap-2 overflow-x-auto scrollbar-hide pb-0.5 -mx-0.5 px-0.5">
-          <StatCard
-            value={requestCount}
-            label="Active Requests"
-            valueClass="text-alert"
-            borderClass="border-alert/20"
-            bgClass="bg-alert/5"
-            dot="bg-alert"
-          />
-          <StatCard
-            value={info.stats.shelterCount}
-            label="Shelters"
-            valueClass="text-info"
-            borderClass="border-info/20"
-            bgClass="bg-info/5"
-            dot="bg-info"
-          />
-          <StatCard
-            value={info.stats.responderCount}
-            label="Responders"
-            valueClass="text-success"
-            borderClass="border-success/20"
-            bgClass="bg-success/5"
-            dot="bg-success"
-          />
-          <StatCard
-            value={criticalCount}
-            label="Critical Cases"
-            valueClass="text-alert"
-            borderClass="border-alert/25"
-            bgClass="bg-alert/[8%]"
-            dot="bg-alert animate-pulse"
-          />
-          <div className="flex shrink-0 items-center gap-1.5 rounded-xl border border-border bg-card px-3 py-2 text-[11px] text-muted-foreground font-medium">
-            <MapPin className="h-3 w-3 text-muted-foreground/60" />
-            <span>{info.stats.area}</span>
-          </div>
-        </div>
+
 
         {/* ── ROW 3: Filter tabs ── */}
         <div className="flex gap-1 overflow-x-auto scrollbar-hide touch-pan-x pb-0.5 -mx-0.5 px-0.5">
